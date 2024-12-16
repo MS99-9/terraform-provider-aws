@@ -159,6 +159,11 @@ func resourceVPCEndpoint() *schema.Resource {
 				Required: true,
 				ForceNew: true,
 			},
+			"service_region": {
+				Type:     schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+			},
 			names.AttrState: {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -272,6 +277,18 @@ func resourceVPCEndpointCreate(ctx context.Context, d *schema.ResourceData, meta
 		input.SubnetIds = flex.ExpandStringValueSet(v.(*schema.Set))
 	}
 
+	if v, ok := d.GetOk("service_region"); ok {
+		_, err := conn.DescribeVpcEndpointServices(context.TODO(), &ec2.DescribeVpcEndpointServicesInput{
+			ServiceNames:   []string{serviceName},
+			ServiceRegions: []string{v.(string)},
+		})
+
+		if err != nil {
+			return sdkdiag.AppendErrorf(diags, "creating EC2 VPC Endpoint (%s): %s", serviceName, err)
+		}
+		input.ServiceRegion = aws.String(v.(string))
+	}
+
 	output, err := conn.CreateVpcEndpoint(ctx, input)
 
 	// Some partitions (e.g. ISO) may not support tag-on-create.
@@ -338,6 +355,7 @@ func resourceVPCEndpointRead(ctx context.Context, d *schema.ResourceData, meta i
 		Resource:  fmt.Sprintf("vpc-endpoint/%s", d.Id()),
 	}.String()
 	serviceName := aws.ToString(vpce.ServiceName)
+	serviceRegion := aws.ToString(vpce.ServiceRegion)
 	d.Set(names.AttrARN, arn)
 	if err := d.Set("dns_entry", flattenDNSEntries(vpce.DnsEntries)); err != nil {
 		return sdkdiag.AppendErrorf(diags, "setting dns_entry: %s", err)
@@ -357,6 +375,7 @@ func resourceVPCEndpointRead(ctx context.Context, d *schema.ResourceData, meta i
 	d.Set("route_table_ids", vpce.RouteTableIds)
 	d.Set(names.AttrSecurityGroupIDs, flattenSecurityGroupIdentifiers(vpce.Groups))
 	d.Set(names.AttrServiceName, serviceName)
+	d.Set("service_region", serviceRegion)
 	d.Set(names.AttrState, vpce.State)
 	d.Set(names.AttrSubnetIDs, vpce.SubnetIds)
 	// VPC endpoints don't have types in GovCloud, so set type to default if empty
